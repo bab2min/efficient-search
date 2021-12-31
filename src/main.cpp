@@ -222,6 +222,7 @@ struct N5STSearcher
 	}
 };
 
+#if defined(__SSE2__) || defined(__AVX2__)
 struct SSE2STSearcher
 {
 	static constexpr const char* _name = "SSE2 SearchTree";
@@ -252,7 +253,10 @@ struct SSE2STSearcher
 		return true;
 	}
 };
+#endif
 
+
+#if defined(__AVX2__)
 struct AVX2STSearcher
 {
 	static constexpr const char* _name = "AVX2 SearchTree";
@@ -283,6 +287,7 @@ struct AVX2STSearcher
 		return true;
 	}
 };
+#endif
 
 template<class KeyTy, class Searcher>
 pair<vector<size_t>, double> benchmark(Searcher&& searcher, size_t size, bool uniform, size_t sample_size, double hit_rate = 0.5)
