@@ -10,6 +10,10 @@
 #pragma intrinsic(_BitScanReverse64)
 #endif
 
+#if _WIN32 || _M_X64 || __x86_64__
+#include <xmmintrin.h>
+#endif
+
 inline int count_trailing_zeroes(uint32_t v)
 {
 	if (v == 0)
