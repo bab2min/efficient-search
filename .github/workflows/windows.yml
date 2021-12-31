@@ -1,0 +1,29 @@
+name: Windows
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-windows:
+    strategy:
+      matrix:
+        os: [windows-2019]
+        arch: [x64]
+
+    runs-on: ${{ matrix.os }}
+    name: ${{ matrix.os }} ${{ matrix.arch }}
+
+    steps:
+    - uses: actions/checkout@v1
+    - uses: ilammy/msvc-dev-cmd@v1
+    - name: Build Bench
+      run: |
+        cl.exe /O2 /arch:AVX2 /D "NDEBUG" /Fe:bench.exe .\src\main.cpp
+    - name: System Info
+      run: |
+        bash -c "cat /proc/cpuinfo"
+        cl.exe
+    - name: Run Bench
+      run: |
+        .\bench.exe

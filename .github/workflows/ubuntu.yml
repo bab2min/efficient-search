@@ -1,0 +1,45 @@
+name: Ubuntu
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-ubuntu:
+    strategy:
+      matrix:
+        include:
+          # Ubuntu 18.04 + gcc-9
+          - name: "Ubuntu 18.04 + gcc-9"
+            os: ubuntu-18.04
+            compiler: gcc
+            version: "9"
+          # Ubuntu 18.04 + clang-9
+          - name: "Ubuntu 18.04 + clang-9"
+            os: ubuntu-18.04
+            compiler: clang
+            version: "9"
+
+    runs-on: ${{ matrix.os }}
+    name: ${{ matrix.name }}
+
+    steps:
+    - uses: actions/checkout@v1
+    - name: Configure Compiler
+      run: |
+        if [ "${{ matrix.compiler }}" = "gcc" ]; then
+          echo "CC=gcc-${{ matrix.version }}" >> $GITHUB_ENV
+          echo "CXX=g++-${{ matrix.version }}" >> $GITHUB_ENV
+        else
+          echo "CC=clang-${{ matrix.version }}" >> $GITHUB_ENV
+          echo "CXX=clang++-${{ matrix.version }}" >> $GITHUB_ENV
+        fi
+    - name: Build
+      run: ${{ env.CXX }} src/main.cpp -std=c++11 -O3 -g -DNDEBUG -march=native -o bench.out
+    - name: System Info
+      run: |
+        cat /proc/cpuinfo
+        g++ -v
+    - name: Run Bench
+      run: |
+        ./bench.out
