@@ -147,8 +147,8 @@ template<size_t n, class IntTy>
 CondBool<n, IntTy, 16> nst_search_sse2(const IntTy* keys, size_t size, IntTy target, size_t& ret)
 {
 	size_t i = 0;
-	
-	__m128i ptarget;
+
+	__m128i ptarget, pkey, peq, pgt;
 	switch (sizeof(IntTy))
 	{
 	case 1:
@@ -164,8 +164,7 @@ CondBool<n, IntTy, 16> nst_search_sse2(const IntTy* keys, size_t size, IntTy tar
 
 	while (i < size)
 	{
-		__m128i pkey = _mm_loadu_si128((const __m128i*)&keys[i]);
-		__m128i peq, pgt;
+		pkey = _mm_loadu_si128((const __m128i*) & keys[i]);
 		switch (sizeof(IntTy))
 		{
 		case 1:
@@ -195,10 +194,83 @@ CondBool<n, IntTy, 16> nst_search_sse2(const IntTy* keys, size_t size, IntTy tar
 	}
 	return false;
 }
+
+template<size_t n, class IntTy>
+CondBool<n, IntTy, 16> nst2_search_sse2(const IntTy* keys, size_t size, IntTy target, size_t& ret)
+{
+	size_t i = 0;
+
+	__m128i ptarget, pkey, pgt;
+	switch (sizeof(IntTy))
+	{
+	case 1:
+		ptarget = _mm_set1_epi8(target);
+		break;
+	case 2:
+		ptarget = _mm_set1_epi16(target);
+		break;
+	case 4:
+		ptarget = _mm_set1_epi32(target);
+		break;
+	}
+
+	while (i + 16 / sizeof(IntTy) < size)
+	{
+		pkey = _mm_loadu_si128((const __m128i*) & keys[i]);
+		switch (sizeof(IntTy))
+		{
+		case 1:
+			pgt = _mm_cmpgt_epi8(ptarget, pkey);
+			break;
+		case 2:
+			pgt = _mm_cmpgt_epi16(ptarget, pkey);
+			break;
+		case 4:
+			pgt = _mm_cmpgt_epi32(ptarget, pkey);
+			break;
+		}
+
+		size_t r = popcount(_mm_movemask_epi8(pgt)) / sizeof(IntTy);
+		if (keys[i + r] == target)
+		{
+			ret = i + r;
+			return true;
+		}
+
+		i = i * n + (n - 1) * (r + 1);
+	}
+
+	if (i < size)
+	{
+		pkey = _mm_loadu_si128((const __m128i*) & keys[i]);
+		switch (sizeof(IntTy))
+		{
+		case 1:
+			pgt = _mm_cmpeq_epi8(ptarget, pkey);
+			break;
+		case 2:
+			pgt = _mm_cmpeq_epi16(ptarget, pkey);
+			break;
+		case 4:
+			pgt = _mm_cmpeq_epi32(ptarget, pkey);
+			break;
+		}
+
+		uint32_t m = _mm_movemask_epi8(pgt);
+		uint32_t p = count_trailing_zeroes(m);
+		if (m && (i + p / sizeof(IntTy)) < size)
+		{
+			ret = i + p / sizeof(IntTy);
+			return true;
+		}
+	}
+	return false;
+}
 #endif
 
 #ifdef __AVX2__
 #include <immintrin.h>
+
 template<size_t n, class IntTy>
 CondBool<n, IntTy, 32> nst_search_avx2(const IntTy* keys, size_t size, IntTy target, size_t& ret)
 {
@@ -248,6 +320,79 @@ CondBool<n, IntTy, 32> nst_search_avx2(const IntTy* keys, size_t size, IntTy tar
 
 		size_t r = popcount(_mm256_movemask_epi8(pgt)) / sizeof(IntTy);
 		i = i * n + (n - 1) * (r + 1);
+	}
+	return false;
+}
+
+template<size_t n, class IntTy>
+CondBool<n, IntTy, 32> nst2_search_avx2(const IntTy* keys, size_t size, IntTy target, size_t& ret)
+{
+	size_t i = 0;
+
+	__m256i ptarget, pkey, peq, pgt;
+	switch (sizeof(IntTy))
+	{
+	case 1:
+		ptarget = _mm256_set1_epi8(target);
+		break;
+	case 2:
+		ptarget = _mm256_set1_epi16(target);
+		break;
+	case 4:
+		ptarget = _mm256_set1_epi32(target);
+		break;
+	}
+
+	while (i + 32 / sizeof(IntTy) < size)
+	{
+		pkey = _mm256_loadu_si256((const __m256i*) & keys[i]);
+		peq, pgt;
+		switch (sizeof(IntTy))
+		{
+		case 1:
+			pgt = _mm256_cmpgt_epi8(ptarget, pkey);
+			break;
+		case 2:
+			pgt = _mm256_cmpgt_epi16(ptarget, pkey);
+			break;
+		case 4:
+			pgt = _mm256_cmpgt_epi32(ptarget, pkey);
+			break;
+		}
+
+		size_t r = popcount(_mm256_movemask_epi8(pgt)) / sizeof(IntTy);
+		if (keys[i + r] == target)
+		{
+			ret = i + r;
+			return true;
+		}
+
+		i = i * n + (n - 1) * (r + 1);
+	}
+
+	if (i < size)
+	{
+		pkey = _mm256_loadu_si256((const __m256i*) & keys[i]);
+		switch (sizeof(IntTy))
+		{
+		case 1:
+			pgt = _mm256_cmpeq_epi8(ptarget, pkey);
+			break;
+		case 2:
+			pgt = _mm256_cmpeq_epi16(ptarget, pkey);
+			break;
+		case 4:
+			pgt = _mm256_cmpeq_epi32(ptarget, pkey);
+			break;
+		}
+
+		uint32_t m = _mm256_movemask_epi8(pgt);
+		uint32_t p = count_trailing_zeroes(m);
+		if (m && (i + p / sizeof(IntTy)) < size)
+		{
+			ret = i + p / sizeof(IntTy);
+			return true;
+		}
 	}
 	return false;
 }

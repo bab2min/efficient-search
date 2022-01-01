@@ -253,6 +253,21 @@ struct SSE2STSearcher
 		return true;
 	}
 };
+
+struct SSE2ST2Searcher : public SSE2STSearcher
+{
+	static constexpr const char* _name = "SSE2 SearchTree (type2)";
+
+	template<class KeyTy, class ValueTy>
+	bool search(const KeyTy* keys, const ValueTy* values, size_t size, KeyTy target, ValueTy& found)
+	{
+		static constexpr size_t n = 16 / sizeof(KeyTy) + 1;
+		size_t idx;
+		if (!nst2_search_sse2<n>(keys, size, target, idx)) return false;
+		found = values[idx];
+		return true;
+	}
+};
 #endif
 
 
@@ -283,6 +298,21 @@ struct AVX2STSearcher
 		static constexpr size_t n = 32 / sizeof(KeyTy) + 1;
 		size_t idx;
 		if (!nst_search_avx2<n>(keys, size, target, idx)) return false;
+		found = values[idx];
+		return true;
+	}
+};
+
+struct AVX2ST2Searcher : public AVX2STSearcher
+{
+	static constexpr const char* _name = "AVX2 SearchTree (type2)";
+
+	template<class KeyTy, class ValueTy>
+	bool search(const KeyTy* keys, const ValueTy* values, size_t size, KeyTy target, ValueTy& found)
+	{
+		static constexpr size_t n = 32 / sizeof(KeyTy) + 1;
+		size_t idx;
+		if (!nst2_search_avx2<n>(keys, size, target, idx)) return false;
 		found = values[idx];
 		return true;
 	}
@@ -375,9 +405,11 @@ int main()
 		N5STSearcher,
 #if defined(__SSE2__) || defined(__AVX2__)
 		SSE2STSearcher,
+		SSE2ST2Searcher,
 #endif
 #ifdef __AVX2__
 		AVX2STSearcher,
+		AVX2ST2Searcher,
 #endif
 		BSTSearcher
 	>;
