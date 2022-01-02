@@ -118,5 +118,7 @@ inline uint32_t popcount(uint32_t v)
 	return __builtin_popcount(v);
 #elif defined(_MSC_VER)
 	return __popcnt(v);
+#else
+	throw "";
 #endif
 }

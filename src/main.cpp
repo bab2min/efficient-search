@@ -123,7 +123,7 @@ struct BalancedBinarySearcher : public ReferenceSearcher
 
 struct BalancedBinaryPrefetchSearcher : public ReferenceSearcher
 {
-	static constexpr const char* _name = "BalancedBinaryPrefetch";
+	static constexpr const char* _name = "BalancedBinary Prefetch";
 
 	template<class KeyTy, class ValueTy>
 	bool search(const KeyTy* keys, const ValueTy* values, size_t size, KeyTy target, ValueTy& found)
@@ -223,6 +223,34 @@ struct N5STSearcher
 };
 
 #if defined(__SSE2__) || defined(__AVX2__)
+struct SSE2BBSearcher : public ReferenceSearcher
+{
+	static constexpr const char* _name = "SSE2 BalancedBin.";
+
+	template<class KeyTy, class ValueTy>
+	bool search(const KeyTy* keys, const ValueTy* values, size_t size, KeyTy target, ValueTy& found)
+	{
+		size_t idx;
+		if (!balanced_binary_search_sse2<false>(keys, size, target, idx)) return false;
+		found = values[idx];
+		return true;
+	}
+};
+
+struct SSE2BBPrefetchSearcher : public ReferenceSearcher
+{
+	static constexpr const char* _name = "SSE2 BalancedBin. Pref.";
+
+	template<class KeyTy, class ValueTy>
+	bool search(const KeyTy* keys, const ValueTy* values, size_t size, KeyTy target, ValueTy& found)
+	{
+		size_t idx;
+		if (!balanced_binary_search_sse2<true>(keys, size, target, idx)) return false;
+		found = values[idx];
+		return true;
+	}
+};
+
 struct SSE2STSearcher
 {
 	static constexpr const char* _name = "SSE2 SearchTree";
@@ -272,6 +300,34 @@ struct SSE2ST2Searcher : public SSE2STSearcher
 
 
 #if defined(__AVX2__)
+struct AVX2BBSearcher : public ReferenceSearcher
+{
+	static constexpr const char* _name = "AVX2 BalancedBin.";
+
+	template<class KeyTy, class ValueTy>
+	bool search(const KeyTy* keys, const ValueTy* values, size_t size, KeyTy target, ValueTy& found)
+	{
+		size_t idx;
+		if (!balanced_binary_search_avx2<false>(keys, size, target, idx)) return false;
+		found = values[idx];
+		return true;
+	}
+};
+
+struct AVX2BBPrefetchSearcher : public ReferenceSearcher
+{
+	static constexpr const char* _name = "AVX2 BalancedBin. Pref.";
+
+	template<class KeyTy, class ValueTy>
+	bool search(const KeyTy* keys, const ValueTy* values, size_t size, KeyTy target, ValueTy& found)
+	{
+		size_t idx;
+		if (!balanced_binary_search_avx2<true>(keys, size, target, idx)) return false;
+		found = values[idx];
+		return true;
+	}
+};
+
 struct AVX2STSearcher
 {
 	static constexpr const char* _name = "AVX2 SearchTree";
@@ -313,6 +369,55 @@ struct AVX2ST2Searcher : public AVX2STSearcher
 		static constexpr size_t n = 32 / sizeof(KeyTy) + 1;
 		size_t idx;
 		if (!nst2_search_avx2<n>(keys, size, target, idx)) return false;
+		found = values[idx];
+		return true;
+	}
+};
+#endif
+
+#if defined(__ARM_NEON__) || defined(__ARM_NEON)
+
+struct NeonSTSearcher
+{
+	static constexpr const char* _name = "Neon SearchTree";
+
+	template<class KeyTy, class ValueTy>
+	void prepare(KeyTy* keys, ValueTy* values, size_t size)
+	{
+		static constexpr size_t n = 16 / sizeof(KeyTy) + 1;
+		vector<size_t> idx = nst_order<n>(keys, size);
+
+		vector<KeyTy> temp_keys{ keys, keys + size };
+		vector<ValueTy> temp_values{ values, values + size };
+
+		for (size_t i = 0; i < size; ++i)
+		{
+			keys[i] = temp_keys[idx[i]];
+			values[i] = temp_values[idx[i]];
+		}
+	}
+
+	template<class KeyTy, class ValueTy>
+	bool search(const KeyTy* keys, const ValueTy* values, size_t size, KeyTy target, ValueTy& found)
+	{
+		static constexpr size_t n = 16 / sizeof(KeyTy) + 1;
+		size_t idx;
+		if (!nst_search_neon<n>(keys, size, target, idx)) return false;
+		found = values[idx];
+		return true;
+	}
+};
+
+struct NeonST2Searcher : public NeonSTSearcher
+{
+	static constexpr const char* _name = "Neon SearchTree (type2)";
+
+	template<class KeyTy, class ValueTy>
+	bool search(const KeyTy* keys, const ValueTy* values, size_t size, KeyTy target, ValueTy& found)
+	{
+		static constexpr size_t n = 16 / sizeof(KeyTy) + 1;
+		size_t idx;
+		if (!nst2_search_neon<n>(keys, size, target, idx)) return false;
 		found = values[idx];
 		return true;
 	}
@@ -393,10 +498,15 @@ void run_benchmark_set(tuple<Searchers...>, size_t size, bool uniform, size_t sa
 	}
 }
 
-int main()
+int main(int argc, char** argv)
 {
 	const size_t sample_size = 1000 * 1000;
-	const size_t repeat = 20;
+	size_t repeat = 20;
+
+	if (argc > 1)
+	{
+		repeat = atoi(argv[1]);
+	}
 
 	using Searchers = tuple<
 		BalancedBinarySearcher,
@@ -404,12 +514,20 @@ int main()
 		N3STSearcher,
 		N5STSearcher,
 #if defined(__SSE2__) || defined(__AVX2__)
+		SSE2BBSearcher,
+		SSE2BBPrefetchSearcher,
 		SSE2STSearcher,
 		SSE2ST2Searcher,
 #endif
 #ifdef __AVX2__
+		AVX2BBSearcher,
+		AVX2BBPrefetchSearcher,
 		AVX2STSearcher,
 		AVX2ST2Searcher,
+#endif
+#if defined(__ARM_NEON__) || defined(__ARM_NEON)
+		NeonSTSearcher,
+		NeonST2Searcher,
 #endif
 		BSTSearcher
 	>;
