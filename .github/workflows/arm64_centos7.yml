@@ -1,0 +1,26 @@
+name: Arm64-Centos7
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-centos:
+    name: Arm64-Centos7
+    runs-on: ubuntu-18.04
+
+    steps:
+    - uses: actions/checkout@v1
+    - uses: bab2min/run-on-arch-action@use-custom-image
+      id: runcmd
+      with:
+        image: quay.io/pypa/manylinux2014_aarch64
+        githubToken: ${{ github.token }}
+        setup: |
+          mkdir -p "${PWD}/artifacts"
+        dockerRunArgs: |
+          --volume "${PWD}/artifacts:/artifacts"
+        run: |
+          g++ src/main.cpp -std=c++11 -O3 -g -DNDEBUG -march=native -o bench.out
+          g++ -v
+          ./bench.out 3

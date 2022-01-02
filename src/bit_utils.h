@@ -12,6 +12,7 @@
 
 #if _WIN32 || _M_X64 || __x86_64__
 #include <xmmintrin.h>
+#include <immintrin.h>
 #endif
 
 inline int count_trailing_zeroes(uint32_t v)
@@ -118,5 +119,7 @@ inline uint32_t popcount(uint32_t v)
 	return __builtin_popcount(v);
 #elif defined(_MSC_VER)
 	return __popcnt(v);
+#else
+	throw "";
 #endif
 }
