@@ -21,6 +21,6 @@ jobs:
         dockerRunArgs: |
           --volume "${PWD}/artifacts:/artifacts"
         run: |
-          g++ src/main.cpp -std=c++11 -O3 -g -DNDEBUG -march=native -o bench.out
+          g++ src/main.cpp -std=c++17 -O3 -g -DNDEBUG -march=native -o bench.out
           g++ -v
           ./bench.out 3
