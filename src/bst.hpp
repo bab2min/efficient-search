@@ -121,7 +121,8 @@ bool nst_search(const KeyTy* keys, size_t size, KeyTy target, size_t& ret)
 	while (i < size)
 	{
 		size_t r = 0;
-		for (size_t k = 0; k < n - 1; ++k)
+		size_t ke = std::min(n - 1, size - i);
+		for (size_t k = 0; k < ke; ++k)
 		{
 			if (target == keys[i + k])
 			{
@@ -138,7 +139,7 @@ bool nst_search(const KeyTy* keys, size_t size, KeyTy target, size_t& ret)
 
 
 template<size_t n, class IntTy, size_t p>
-using CondBool = typename std::enable_if<(n - 1) * sizeof(IntTy) == p, bool>::type;
+using CondBool = typename std::enable_if<(n - 1) % (p / sizeof(IntTy)) == 0, bool>::type;
 
 #if defined(__SSE2__) || defined(__AVX2__)
 #include <xmmintrin.h>
@@ -146,6 +147,8 @@ using CondBool = typename std::enable_if<(n - 1) * sizeof(IntTy) == p, bool>::ty
 template<size_t n, class IntTy>
 CondBool<n, IntTy, 16> nst_search_sse2(const IntTy* keys, size_t size, IntTy target, size_t& ret)
 {
+	static constexpr size_t packet_size = 16 / sizeof(IntTy);
+	static constexpr size_t inner_size = (n - 1) / packet_size;
 	size_t i = 0;
 
 	__m128i ptarget, pkey, peq, pgt;
@@ -164,7 +167,7 @@ CondBool<n, IntTy, 16> nst_search_sse2(const IntTy* keys, size_t size, IntTy tar
 
 	while (i < size)
 	{
-		pkey = _mm_loadu_si128((const __m128i*) & keys[i]);
+		pkey = _mm_loadu_si128((const __m128i*)&keys[i]);
 		switch (sizeof(IntTy))
 		{
 		case 1:
@@ -188,7 +191,6 @@ CondBool<n, IntTy, 16> nst_search_sse2(const IntTy* keys, size_t size, IntTy tar
 			ret = i + p / sizeof(IntTy);
 			return true;
 		}
-
 		size_t r = popcount(_mm_movemask_epi8(pgt)) / sizeof(IntTy);
 		i = i * n + (n - 1) * (r + 1);
 	}
@@ -216,7 +218,7 @@ CondBool<n, IntTy, 16> nst2_search_sse2(const IntTy* keys, size_t size, IntTy ta
 
 	while (i + 16 / sizeof(IntTy) < size)
 	{
-		pkey = _mm_loadu_si128((const __m128i*) & keys[i]);
+		pkey = _mm_loadu_si128((const __m128i*)&keys[i]);
 		switch (sizeof(IntTy))
 		{
 		case 1:
@@ -242,7 +244,7 @@ CondBool<n, IntTy, 16> nst2_search_sse2(const IntTy* keys, size_t size, IntTy ta
 
 	if (i < size)
 	{
-		pkey = _mm_loadu_si128((const __m128i*) & keys[i]);
+		pkey = _mm_loadu_si128((const __m128i*)&keys[i]);
 		switch (sizeof(IntTy))
 		{
 		case 1:
@@ -292,7 +294,7 @@ CondBool<n, IntTy, 32> nst_search_avx2(const IntTy* keys, size_t size, IntTy tar
 
 	while (i < size)
 	{
-		pkey = _mm256_loadu_si256((const __m256i*) & keys[i]);
+		pkey = _mm256_loadu_si256((const __m256i*)&keys[i]);
 		switch (sizeof(IntTy))
 		{
 		case 1:
@@ -344,7 +346,7 @@ CondBool<n, IntTy, 32> nst2_search_avx2(const IntTy* keys, size_t size, IntTy ta
 
 	while (i + 32 / sizeof(IntTy) < size)
 	{
-		pkey = _mm256_loadu_si256((const __m256i*) & keys[i]);
+		pkey = _mm256_loadu_si256((const __m256i*)&keys[i]);
 		peq, pgt;
 		switch (sizeof(IntTy))
 		{
@@ -371,7 +373,7 @@ CondBool<n, IntTy, 32> nst2_search_avx2(const IntTy* keys, size_t size, IntTy ta
 
 	if (i < size)
 	{
-		pkey = _mm256_loadu_si256((const __m256i*) & keys[i]);
+		pkey = _mm256_loadu_si256((const __m256i*)&keys[i]);
 		switch (sizeof(IntTy))
 		{
 		case 1:

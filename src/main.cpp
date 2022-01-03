@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <numeric>
 
+#include "static_str.hpp"
 #include "balanced_binary.hpp"
 #include "bst.hpp"
 
@@ -72,7 +73,7 @@ vector<IntTy> rand_array(size_t size, bool uniform = true, size_t seed = 42)
 
 struct ReferenceSearcher
 {
-	static constexpr const char* _name = "Reference";
+	static constexpr auto _name = ss::from_literal("Reference");
 
 	template<class KeyTy, class ValueTy>
 	void prepare(KeyTy* keys, ValueTy* values, size_t size)
@@ -109,7 +110,7 @@ struct ReferenceSearcher
 
 struct BalancedBinarySearcher : public ReferenceSearcher
 {
-	static constexpr const char* _name = "BalancedBinary";
+	static constexpr auto _name = ss::from_literal("BalancedBinary");
 
 	template<class KeyTy, class ValueTy>
 	bool search(const KeyTy* keys, const ValueTy* values, size_t size, KeyTy target, ValueTy& found)
@@ -123,7 +124,7 @@ struct BalancedBinarySearcher : public ReferenceSearcher
 
 struct BalancedBinaryPrefetchSearcher : public ReferenceSearcher
 {
-	static constexpr const char* _name = "BalancedBinary Prefetch";
+	static constexpr auto _name = ss::from_literal("BalancedBinary Prefetch");
 
 	template<class KeyTy, class ValueTy>
 	bool search(const KeyTy* keys, const ValueTy* values, size_t size, KeyTy target, ValueTy& found)
@@ -137,7 +138,7 @@ struct BalancedBinaryPrefetchSearcher : public ReferenceSearcher
 
 struct BSTSearcher
 {
-	static constexpr const char* _name = "BinarySearchTree";
+	static constexpr auto _name = ss::from_literal("BinarySearchTree");
 
 	template<class KeyTy, class ValueTy>
 	void prepare(KeyTy* keys, ValueTy* values, size_t size)
@@ -164,14 +165,15 @@ struct BSTSearcher
 	}
 };
 
-struct N3STSearcher
+template<size_t n>
+struct NSTSearcher
 {
-	static constexpr const char* _name = "3-ary SearchTree";
+	static constexpr auto _name = ss::num_to_string<n>::value + ss::from_literal("-ary SearchTree");
 
 	template<class KeyTy, class ValueTy>
 	void prepare(KeyTy* keys, ValueTy* values, size_t size)
 	{
-		vector<size_t> idx = nst_order<3>(keys, size);
+		vector<size_t> idx = nst_order<n>(keys, size);
 
 		vector<KeyTy> temp_keys{ keys, keys + size };
 		vector<ValueTy> temp_values{ values, values + size };
@@ -187,36 +189,7 @@ struct N3STSearcher
 	bool search(const KeyTy* keys, const ValueTy* values, size_t size, KeyTy target, ValueTy& found)
 	{
 		size_t idx;
-		if (!nst_search<3>(keys, size, target, idx)) return false;
-		found = values[idx];
-		return true;
-	}
-};
-
-struct N5STSearcher
-{
-	static constexpr const char* _name = "5-ary SearchTree";
-
-	template<class KeyTy, class ValueTy>
-	void prepare(KeyTy* keys, ValueTy* values, size_t size)
-	{
-		vector<size_t> idx = nst_order<5>(keys, size);
-
-		vector<KeyTy> temp_keys{ keys, keys + size };
-		vector<ValueTy> temp_values{ values, values + size };
-
-		for (size_t i = 0; i < size; ++i)
-		{
-			keys[i] = temp_keys[idx[i]];
-			values[i] = temp_values[idx[i]];
-		}
-	}
-
-	template<class KeyTy, class ValueTy>
-	bool search(const KeyTy* keys, const ValueTy* values, size_t size, KeyTy target, ValueTy& found)
-	{
-		size_t idx;
-		if (!nst_search<5>(keys, size, target, idx)) return false;
+		if (!nst_search<n>(keys, size, target, idx)) return false;
 		found = values[idx];
 		return true;
 	}
@@ -225,7 +198,7 @@ struct N5STSearcher
 #if defined(__SSE2__) || defined(__AVX2__)
 struct SSE2BBSearcher : public ReferenceSearcher
 {
-	static constexpr const char* _name = "SSE2 BalancedBin.";
+	static constexpr auto _name = ss::from_literal("SSE2 BalancedBin.");
 
 	template<class KeyTy, class ValueTy>
 	bool search(const KeyTy* keys, const ValueTy* values, size_t size, KeyTy target, ValueTy& found)
@@ -239,7 +212,7 @@ struct SSE2BBSearcher : public ReferenceSearcher
 
 struct SSE2BBPrefetchSearcher : public ReferenceSearcher
 {
-	static constexpr const char* _name = "SSE2 BalancedBin. Pref.";
+	static constexpr auto _name = ss::from_literal("SSE2 BalancedBin. Pref.");
 
 	template<class KeyTy, class ValueTy>
 	bool search(const KeyTy* keys, const ValueTy* values, size_t size, KeyTy target, ValueTy& found)
@@ -253,7 +226,7 @@ struct SSE2BBPrefetchSearcher : public ReferenceSearcher
 
 struct SSE2STSearcher
 {
-	static constexpr const char* _name = "SSE2 SearchTree";
+	static constexpr auto _name = ss::from_literal("SSE2 SearchTree");
 
 	template<class KeyTy, class ValueTy>
 	void prepare(KeyTy* keys, ValueTy* values, size_t size)
@@ -284,7 +257,7 @@ struct SSE2STSearcher
 
 struct SSE2ST2Searcher : public SSE2STSearcher
 {
-	static constexpr const char* _name = "SSE2 SearchTree (type2)";
+	static constexpr auto _name = ss::from_literal("SSE2 SearchTree (type2)");
 
 	template<class KeyTy, class ValueTy>
 	bool search(const KeyTy* keys, const ValueTy* values, size_t size, KeyTy target, ValueTy& found)
@@ -302,7 +275,7 @@ struct SSE2ST2Searcher : public SSE2STSearcher
 #if defined(__AVX2__)
 struct AVX2BBSearcher : public ReferenceSearcher
 {
-	static constexpr const char* _name = "AVX2 BalancedBin.";
+	static constexpr auto _name = ss::from_literal("AVX2 BalancedBin.");
 
 	template<class KeyTy, class ValueTy>
 	bool search(const KeyTy* keys, const ValueTy* values, size_t size, KeyTy target, ValueTy& found)
@@ -316,7 +289,7 @@ struct AVX2BBSearcher : public ReferenceSearcher
 
 struct AVX2BBPrefetchSearcher : public ReferenceSearcher
 {
-	static constexpr const char* _name = "AVX2 BalancedBin. Pref.";
+	static constexpr auto _name = ss::from_literal("AVX2 BalancedBin. Pref.");
 
 	template<class KeyTy, class ValueTy>
 	bool search(const KeyTy* keys, const ValueTy* values, size_t size, KeyTy target, ValueTy& found)
@@ -330,7 +303,7 @@ struct AVX2BBPrefetchSearcher : public ReferenceSearcher
 
 struct AVX2STSearcher
 {
-	static constexpr const char* _name = "AVX2 SearchTree";
+	static constexpr auto _name = ss::from_literal("AVX2 SearchTree");
 
 	template<class KeyTy, class ValueTy>
 	void prepare(KeyTy* keys, ValueTy* values, size_t size)
@@ -361,7 +334,7 @@ struct AVX2STSearcher
 
 struct AVX2ST2Searcher : public AVX2STSearcher
 {
-	static constexpr const char* _name = "AVX2 SearchTree (type2)";
+	static constexpr auto _name = ss::from_literal("AVX2 SearchTree (type2)");
 
 	template<class KeyTy, class ValueTy>
 	bool search(const KeyTy* keys, const ValueTy* values, size_t size, KeyTy target, ValueTy& found)
@@ -379,7 +352,7 @@ struct AVX2ST2Searcher : public AVX2STSearcher
 
 struct NeonSTSearcher
 {
-	static constexpr const char* _name = "Neon SearchTree";
+	static constexpr auto _name = ss::from_literal("Neon SearchTree");
 
 	template<class KeyTy, class ValueTy>
 	void prepare(KeyTy* keys, ValueTy* values, size_t size)
@@ -410,7 +383,7 @@ struct NeonSTSearcher
 
 struct NeonST2Searcher : public NeonSTSearcher
 {
-	static constexpr const char* _name = "Neon SearchTree (type2)";
+	static constexpr auto _name = ss::from_literal("Neon SearchTree (type2)");
 
 	template<class KeyTy, class ValueTy>
 	bool search(const KeyTy* keys, const ValueTy* values, size_t size, KeyTy target, ValueTy& found)
@@ -465,7 +438,7 @@ void run_benchmark_partial(const vector<size_t>& ref, double* accum, double* acc
 	auto r = benchmark<KeyTy>(First{}, size, uniform, sample_size);
 	if (ref != r.first)
 	{
-		printf("    %s yields a wrong result!\n", First::_name);
+		printf("    %s yields a wrong result!\n", First::_name.c_str());
 	}
 	*accum += r.second;
 	*accum_sq += r.second * r.second;
@@ -486,8 +459,8 @@ void run_benchmark_set(tuple<Searchers...>, size_t size, bool uniform, size_t sa
 	}
 
 	static const char* names[] = {
-		ReferenceSearcher::_name,
-		(Searchers::_name)...,
+		ReferenceSearcher::_name.c_str(),
+		(Searchers::_name.c_str())...,
 	};
 
 	for (size_t i = 0; i < accum.size(); ++i)
@@ -511,8 +484,6 @@ int main(int argc, char** argv)
 	using Searchers = tuple<
 		BalancedBinarySearcher,
 		BalancedBinaryPrefetchSearcher,
-		N3STSearcher,
-		N5STSearcher,
 #if defined(__SSE2__) || defined(__AVX2__)
 		SSE2BBSearcher,
 		SSE2BBPrefetchSearcher,
@@ -529,9 +500,13 @@ int main(int argc, char** argv)
 		NeonSTSearcher,
 		NeonST2Searcher,
 #endif
-		BSTSearcher
+		BSTSearcher,
+		NSTSearcher<3>,
+		NSTSearcher<5>,
+		NSTSearcher<9>,
+		NSTSearcher<17>
 	>;
-	
+
 	for (bool uniform : {true, false})
 	{
 		for (size_t size : { 25, 50, 100, 200, 400, 800, 1600, 3200, 6400, 12800 })
