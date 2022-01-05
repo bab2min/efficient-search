@@ -139,16 +139,36 @@ bool nst_search(const KeyTy* keys, size_t size, KeyTy target, size_t& ret)
 
 
 template<size_t n, class IntTy, size_t p>
-using CondBool = typename std::enable_if<(n - 1) % (p / sizeof(IntTy)) == 0, bool>::type;
+using CondBool = typename std::enable_if<(n - 1) == p / sizeof(IntTy), bool>::type;
+
+template<size_t n, class IntTy, size_t p>
+using NCondBool = typename std::enable_if<(n - 1) != p / sizeof(IntTy), bool>::type;
 
 #if defined(__SSE2__) || defined(__AVX2__)
 #include <xmmintrin.h>
 
+template<class IntTy>
+inline bool test_eq(__m128i p, size_t offset, size_t size, size_t& ret)
+{
+	uint32_t m = _mm_movemask_epi8(p);
+	uint32_t b = count_trailing_zeroes(m);
+	if (m && (offset + b / sizeof(IntTy)) < size)
+	{
+		ret = offset + b / sizeof(IntTy);
+		return true;
+	}
+	return false;
+}
+
+template<size_t n, class IntTy>
+typename std::enable_if < (n - 1) < 16 / sizeof(IntTy), bool > ::type nst_search_sse2(const IntTy* keys, size_t size, IntTy target, size_t& ret)
+{
+	return nst_search<n>(keys, size, target, ret);
+}
+
 template<size_t n, class IntTy>
 CondBool<n, IntTy, 16> nst_search_sse2(const IntTy* keys, size_t size, IntTy target, size_t& ret)
 {
-	static constexpr size_t packet_size = 16 / sizeof(IntTy);
-	static constexpr size_t inner_size = (n - 1) / packet_size;
 	size_t i = 0;
 
 	__m128i ptarget, pkey, peq, pgt;
@@ -167,7 +187,7 @@ CondBool<n, IntTy, 16> nst_search_sse2(const IntTy* keys, size_t size, IntTy tar
 
 	while (i < size)
 	{
-		pkey = _mm_loadu_si128((const __m128i*)&keys[i]);
+		pkey = _mm_loadu_si128(reinterpret_cast<const __m128i*>(&keys[i]));
 		switch (sizeof(IntTy))
 		{
 		case 1:
@@ -184,17 +204,148 @@ CondBool<n, IntTy, 16> nst_search_sse2(const IntTy* keys, size_t size, IntTy tar
 			break;
 		}
 
-		uint32_t m = _mm_movemask_epi8(peq);
-		uint32_t p = count_trailing_zeroes(m);
-		if (m && (i + p / sizeof(IntTy)) < size)
-		{
-			ret = i + p / sizeof(IntTy);
-			return true;
-		}
+		if (test_eq<IntTy>(peq, i, size, ret)) return true;
+		
 		size_t r = popcount(_mm_movemask_epi8(pgt)) / sizeof(IntTy);
 		i = i * n + (n - 1) * (r + 1);
 	}
 	return false;
+}
+
+template<size_t n, class IntTy>
+CondBool<n, IntTy, 32> nst_search_sse2(const IntTy* keys, size_t size, IntTy target, size_t& ret)
+{
+	static constexpr size_t packet_size = 16 / sizeof(IntTy);
+	static constexpr size_t inner_size = (n - 1) / packet_size;
+	size_t i = 0;
+
+	__m128i ptarget, pkey[inner_size], peq[inner_size], pgt[inner_size];
+	switch (sizeof(IntTy))
+	{
+	case 1:
+		ptarget = _mm_set1_epi8(target);
+		break;
+	case 2:
+		ptarget = _mm_set1_epi16(target);
+		break;
+	case 4:
+		ptarget = _mm_set1_epi32(target);
+		break;
+	}
+
+	while (i < size)
+	{
+		pkey[0] = _mm_loadu_si128(reinterpret_cast<const __m128i*>(&keys[i + 0 * packet_size]));
+		pkey[1] = _mm_loadu_si128(reinterpret_cast<const __m128i*>(&keys[i + 1 * packet_size]));
+		switch (sizeof(IntTy))
+		{
+		case 1:
+			peq[0] = _mm_cmpeq_epi8(ptarget, pkey[0]);
+			pgt[0] = _mm_cmpgt_epi8(ptarget, pkey[0]);
+			peq[1] = _mm_cmpeq_epi8(ptarget, pkey[1]);
+			pgt[1] = _mm_cmpgt_epi8(ptarget, pkey[1]);
+			break;
+		case 2:
+			peq[0] = _mm_cmpeq_epi16(ptarget, pkey[0]);
+			pgt[0] = _mm_cmpgt_epi16(ptarget, pkey[0]);
+			peq[1] = _mm_cmpeq_epi16(ptarget, pkey[1]);
+			pgt[1] = _mm_cmpgt_epi16(ptarget, pkey[1]);
+			break;
+		case 4:
+			peq[0] = _mm_cmpeq_epi32(ptarget, pkey[0]);
+			pgt[0] = _mm_cmpgt_epi32(ptarget, pkey[0]);
+			peq[1] = _mm_cmpeq_epi32(ptarget, pkey[1]);
+			pgt[1] = _mm_cmpgt_epi32(ptarget, pkey[1]);
+			break;
+		}
+
+		if (test_eq<IntTy>(peq[0], i + 0 * packet_size, size, ret)) return true;
+		if (test_eq<IntTy>(peq[1], i + 1 * packet_size, size, ret)) return true;
+			
+		size_t r = (popcount(_mm_movemask_epi8(pgt[0])) + popcount(_mm_movemask_epi8(pgt[1]))) / sizeof(IntTy);
+		i = i * n + (n - 1) * (r + 1);
+	}
+	return false;
+}
+
+template<size_t n, class IntTy>
+CondBool<n, IntTy, 64> nst_search_sse2(const IntTy* keys, size_t size, IntTy target, size_t& ret)
+{
+	static constexpr size_t packet_size = 16 / sizeof(IntTy);
+	static constexpr size_t inner_size = (n - 1) / packet_size;
+	size_t i = 0;
+
+	__m128i ptarget, pkey[inner_size], peq[inner_size], pgt[inner_size];
+	switch (sizeof(IntTy))
+	{
+	case 1:
+		ptarget = _mm_set1_epi8(target);
+		break;
+	case 2:
+		ptarget = _mm_set1_epi16(target);
+		break;
+	case 4:
+		ptarget = _mm_set1_epi32(target);
+		break;
+	}
+
+	while (i < size)
+	{
+		pkey[0] = _mm_loadu_si128(reinterpret_cast<const __m128i*>(&keys[i + 0 * packet_size]));
+		pkey[1] = _mm_loadu_si128(reinterpret_cast<const __m128i*>(&keys[i + 1 * packet_size]));
+		pkey[2] = _mm_loadu_si128(reinterpret_cast<const __m128i*>(&keys[i + 2 * packet_size]));
+		pkey[3] = _mm_loadu_si128(reinterpret_cast<const __m128i*>(&keys[i + 3 * packet_size]));
+		switch (sizeof(IntTy))
+		{
+		case 1:
+			peq[0] = _mm_cmpeq_epi8(ptarget, pkey[0]);
+			pgt[0] = _mm_cmpgt_epi8(ptarget, pkey[0]);
+			peq[1] = _mm_cmpeq_epi8(ptarget, pkey[1]);
+			pgt[1] = _mm_cmpgt_epi8(ptarget, pkey[1]);
+			peq[2] = _mm_cmpeq_epi8(ptarget, pkey[2]);
+			pgt[2] = _mm_cmpgt_epi8(ptarget, pkey[2]);
+			peq[3] = _mm_cmpeq_epi8(ptarget, pkey[3]);
+			pgt[3] = _mm_cmpgt_epi8(ptarget, pkey[3]);
+			break;
+		case 2:
+			peq[0] = _mm_cmpeq_epi16(ptarget, pkey[0]);
+			pgt[0] = _mm_cmpgt_epi16(ptarget, pkey[0]);
+			peq[1] = _mm_cmpeq_epi16(ptarget, pkey[1]);
+			pgt[1] = _mm_cmpgt_epi16(ptarget, pkey[1]);
+			peq[2] = _mm_cmpeq_epi16(ptarget, pkey[2]);
+			pgt[2] = _mm_cmpgt_epi16(ptarget, pkey[2]);
+			peq[3] = _mm_cmpeq_epi16(ptarget, pkey[3]);
+			pgt[3] = _mm_cmpgt_epi16(ptarget, pkey[3]);
+			break;
+		case 4:
+			peq[0] = _mm_cmpeq_epi32(ptarget, pkey[0]);
+			pgt[0] = _mm_cmpgt_epi32(ptarget, pkey[0]);
+			peq[1] = _mm_cmpeq_epi32(ptarget, pkey[1]);
+			pgt[1] = _mm_cmpgt_epi32(ptarget, pkey[1]);
+			peq[2] = _mm_cmpeq_epi32(ptarget, pkey[2]);
+			pgt[2] = _mm_cmpgt_epi32(ptarget, pkey[2]);
+			peq[3] = _mm_cmpeq_epi32(ptarget, pkey[3]);
+			pgt[3] = _mm_cmpgt_epi32(ptarget, pkey[3]);
+			break;
+		}
+
+		if (test_eq<IntTy>(peq[0], i + 0 * packet_size, size, ret)) return true;
+		if (test_eq<IntTy>(peq[1], i + 1 * packet_size, size, ret)) return true;
+		if (test_eq<IntTy>(peq[2], i + 2 * packet_size, size, ret)) return true;
+		if (test_eq<IntTy>(peq[3], i + 3 * packet_size, size, ret)) return true;
+
+		size_t r = (popcount(_mm_movemask_epi8(pgt[0])) + popcount(_mm_movemask_epi8(pgt[1]))
+			+ popcount(_mm_movemask_epi8(pgt[2])) + popcount(_mm_movemask_epi8(pgt[3]))
+		) / sizeof(IntTy);
+		i = i * n + (n - 1) * (r + 1);
+	}
+	return false;
+}
+
+template<size_t n, class IntTy>
+typename std::enable_if < (n - 1) < 16 / sizeof(IntTy), bool > ::type nst2_search_sse2(const IntTy* keys, size_t size, IntTy target, size_t& ret)
+{
+	return nst_search<n>(keys, size, target, ret);
 }
 
 template<size_t n, class IntTy>
@@ -218,7 +369,7 @@ CondBool<n, IntTy, 16> nst2_search_sse2(const IntTy* keys, size_t size, IntTy ta
 
 	while (i + 16 / sizeof(IntTy) < size)
 	{
-		pkey = _mm_loadu_si128((const __m128i*)&keys[i]);
+		pkey = _mm_loadu_si128(reinterpret_cast<const __m128i*>(&keys[i]));
 		switch (sizeof(IntTy))
 		{
 		case 1:
@@ -244,7 +395,7 @@ CondBool<n, IntTy, 16> nst2_search_sse2(const IntTy* keys, size_t size, IntTy ta
 
 	if (i < size)
 	{
-		pkey = _mm_loadu_si128((const __m128i*)&keys[i]);
+		pkey = _mm_loadu_si128(reinterpret_cast<const __m128i*>(&keys[i]));
 		switch (sizeof(IntTy))
 		{
 		case 1:
@@ -258,13 +409,181 @@ CondBool<n, IntTy, 16> nst2_search_sse2(const IntTy* keys, size_t size, IntTy ta
 			break;
 		}
 
-		uint32_t m = _mm_movemask_epi8(pgt);
-		uint32_t p = count_trailing_zeroes(m);
-		if (m && (i + p / sizeof(IntTy)) < size)
+		if (test_eq<IntTy>(pgt, i, size, ret)) return true;
+	}
+	return false;
+}
+
+template<size_t n, class IntTy>
+CondBool<n, IntTy, 32> nst2_search_sse2(const IntTy* keys, size_t size, IntTy target, size_t& ret)
+{
+	static constexpr size_t packet_size = 16 / sizeof(IntTy);
+	static constexpr size_t inner_size = (n - 1) / packet_size;
+	size_t i = 0;
+
+	__m128i ptarget, pkey[inner_size], pgt[inner_size];
+	switch (sizeof(IntTy))
+	{
+	case 1:
+		ptarget = _mm_set1_epi8(target);
+		break;
+	case 2:
+		ptarget = _mm_set1_epi16(target);
+		break;
+	case 4:
+		ptarget = _mm_set1_epi32(target);
+		break;
+	}
+
+	while (i + 32 / sizeof(IntTy) < size)
+	{
+		pkey[0] = _mm_loadu_si128(reinterpret_cast<const __m128i*>(&keys[i + 0 * packet_size]));
+		pkey[1] = _mm_loadu_si128(reinterpret_cast<const __m128i*>(&keys[i + 1 * packet_size]));
+		switch (sizeof(IntTy))
 		{
-			ret = i + p / sizeof(IntTy);
+		case 1:
+			pgt[0] = _mm_cmpgt_epi8(ptarget, pkey[0]);
+			pgt[1] = _mm_cmpgt_epi8(ptarget, pkey[1]);
+			break;
+		case 2:
+			pgt[0] = _mm_cmpgt_epi16(ptarget, pkey[0]);
+			pgt[1] = _mm_cmpgt_epi16(ptarget, pkey[1]);
+			break;
+		case 4:
+			pgt[0] = _mm_cmpgt_epi32(ptarget, pkey[0]);
+			pgt[1] = _mm_cmpgt_epi32(ptarget, pkey[1]);
+			break;
+		}
+
+		size_t r = (popcount(_mm_movemask_epi8(pgt[0])) + popcount(_mm_movemask_epi8(pgt[1]))) / sizeof(IntTy);
+		if (keys[i + r] == target)
+		{
+			ret = i + r;
 			return true;
 		}
+
+		i = i * n + (n - 1) * (r + 1);
+	}
+
+	if (i < size)
+	{
+		pkey[0] = _mm_loadu_si128(reinterpret_cast<const __m128i*>(&keys[i + 0 * packet_size]));
+		pkey[1] = _mm_loadu_si128(reinterpret_cast<const __m128i*>(&keys[i + 1 * packet_size]));
+		switch (sizeof(IntTy))
+		{
+		case 1:
+			pgt[0] = _mm_cmpeq_epi8(ptarget, pkey[0]);
+			pgt[1] = _mm_cmpeq_epi8(ptarget, pkey[1]);
+			break;
+		case 2:
+			pgt[0] = _mm_cmpeq_epi16(ptarget, pkey[0]);
+			pgt[1] = _mm_cmpeq_epi16(ptarget, pkey[1]);
+			break;
+		case 4:
+			pgt[0] = _mm_cmpeq_epi32(ptarget, pkey[0]);
+			pgt[1] = _mm_cmpeq_epi32(ptarget, pkey[1]);
+			break;
+		}
+
+		if (test_eq<IntTy>(pgt[0], i + 0 * packet_size, size, ret)) return true;
+		if (test_eq<IntTy>(pgt[1], i + 1 * packet_size, size, ret)) return true;
+	}
+	return false;
+}
+
+template<size_t n, class IntTy>
+CondBool<n, IntTy, 64> nst2_search_sse2(const IntTy* keys, size_t size, IntTy target, size_t& ret)
+{
+	static constexpr size_t packet_size = 16 / sizeof(IntTy);
+	static constexpr size_t inner_size = (n - 1) / packet_size;
+	size_t i = 0;
+
+	__m128i ptarget, pkey[inner_size], pgt[inner_size];
+	switch (sizeof(IntTy))
+	{
+	case 1:
+		ptarget = _mm_set1_epi8(target);
+		break;
+	case 2:
+		ptarget = _mm_set1_epi16(target);
+		break;
+	case 4:
+		ptarget = _mm_set1_epi32(target);
+		break;
+	}
+
+	while (i + 64 / sizeof(IntTy) < size)
+	{
+		pkey[0] = _mm_loadu_si128(reinterpret_cast<const __m128i*>(&keys[i + 0 * packet_size]));
+		pkey[1] = _mm_loadu_si128(reinterpret_cast<const __m128i*>(&keys[i + 1 * packet_size]));
+		pkey[2] = _mm_loadu_si128(reinterpret_cast<const __m128i*>(&keys[i + 2 * packet_size]));
+		pkey[3] = _mm_loadu_si128(reinterpret_cast<const __m128i*>(&keys[i + 3 * packet_size]));
+		switch (sizeof(IntTy))
+		{
+		case 1:
+			pgt[0] = _mm_cmpgt_epi8(ptarget, pkey[0]);
+			pgt[1] = _mm_cmpgt_epi8(ptarget, pkey[1]);
+			pgt[2] = _mm_cmpgt_epi8(ptarget, pkey[2]);
+			pgt[3] = _mm_cmpgt_epi8(ptarget, pkey[3]);
+			break;
+		case 2:
+			pgt[0] = _mm_cmpgt_epi16(ptarget, pkey[0]);
+			pgt[1] = _mm_cmpgt_epi16(ptarget, pkey[1]);
+			pgt[2] = _mm_cmpgt_epi16(ptarget, pkey[2]);
+			pgt[3] = _mm_cmpgt_epi16(ptarget, pkey[3]);
+			break;
+		case 4:
+			pgt[0] = _mm_cmpgt_epi32(ptarget, pkey[0]);
+			pgt[1] = _mm_cmpgt_epi32(ptarget, pkey[1]);
+			pgt[2] = _mm_cmpgt_epi32(ptarget, pkey[2]);
+			pgt[3] = _mm_cmpgt_epi32(ptarget, pkey[3]);
+			break;
+		}
+
+		size_t r = (popcount(_mm_movemask_epi8(pgt[0])) + popcount(_mm_movemask_epi8(pgt[1]))
+			+ popcount(_mm_movemask_epi8(pgt[2])) + popcount(_mm_movemask_epi8(pgt[3]))
+		) / sizeof(IntTy);
+		if (keys[i + r] == target)
+		{
+			ret = i + r;
+			return true;
+		}
+
+		i = i * n + (n - 1) * (r + 1);
+	}
+
+	if (i < size)
+	{
+		pkey[0] = _mm_loadu_si128(reinterpret_cast<const __m128i*>(&keys[i + 0 * packet_size]));
+		pkey[1] = _mm_loadu_si128(reinterpret_cast<const __m128i*>(&keys[i + 1 * packet_size]));
+		pkey[2] = _mm_loadu_si128(reinterpret_cast<const __m128i*>(&keys[i + 2 * packet_size]));
+		pkey[3] = _mm_loadu_si128(reinterpret_cast<const __m128i*>(&keys[i + 3 * packet_size]));
+		switch (sizeof(IntTy))
+		{
+		case 1:
+			pgt[0] = _mm_cmpeq_epi8(ptarget, pkey[0]);
+			pgt[1] = _mm_cmpeq_epi8(ptarget, pkey[1]);
+			pgt[2] = _mm_cmpeq_epi8(ptarget, pkey[2]);
+			pgt[3] = _mm_cmpeq_epi8(ptarget, pkey[3]);
+			break;
+		case 2:
+			pgt[0] = _mm_cmpeq_epi16(ptarget, pkey[0]);
+			pgt[1] = _mm_cmpeq_epi16(ptarget, pkey[1]);
+			pgt[2] = _mm_cmpeq_epi16(ptarget, pkey[2]);
+			pgt[3] = _mm_cmpeq_epi16(ptarget, pkey[3]);
+			break;
+		case 4:
+			pgt[0] = _mm_cmpeq_epi32(ptarget, pkey[0]);
+			pgt[1] = _mm_cmpeq_epi32(ptarget, pkey[1]);
+			pgt[2] = _mm_cmpeq_epi32(ptarget, pkey[2]);
+			pgt[3] = _mm_cmpeq_epi32(ptarget, pkey[3]);
+			break;
+		}
+
+		if (test_eq<IntTy>(pgt[0], i + 0 * packet_size, size, ret)) return true;
+		if (test_eq<IntTy>(pgt[1], i + 1 * packet_size, size, ret)) return true;
+		if (test_eq<IntTy>(pgt[2], i + 2 * packet_size, size, ret)) return true;
+		if (test_eq<IntTy>(pgt[3], i + 3 * packet_size, size, ret)) return true;
 	}
 	return false;
 }
@@ -272,6 +591,25 @@ CondBool<n, IntTy, 16> nst2_search_sse2(const IntTy* keys, size_t size, IntTy ta
 
 #ifdef __AVX2__
 #include <immintrin.h>
+
+template<class IntTy>
+inline bool test_eq(__m256i p, size_t offset, size_t size, size_t& ret)
+{
+	uint32_t m = _mm256_movemask_epi8(p);
+	uint32_t b = count_trailing_zeroes(m);
+	if (m && (offset + b / sizeof(IntTy)) < size)
+	{
+		ret = offset + b / sizeof(IntTy);
+		return true;
+	}
+	return false;
+}
+
+template<size_t n, class IntTy>
+typename std::enable_if < (n - 1) < 32 / sizeof(IntTy), bool > ::type nst_search_avx2(const IntTy* keys, size_t size, IntTy target, size_t& ret)
+{
+	return nst_search<n>(keys, size, target, ret);
+}
 
 template<size_t n, class IntTy>
 CondBool<n, IntTy, 32> nst_search_avx2(const IntTy* keys, size_t size, IntTy target, size_t& ret)
@@ -294,7 +632,7 @@ CondBool<n, IntTy, 32> nst_search_avx2(const IntTy* keys, size_t size, IntTy tar
 
 	while (i < size)
 	{
-		pkey = _mm256_loadu_si256((const __m256i*)&keys[i]);
+		pkey = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(&keys[i]));
 		switch (sizeof(IntTy))
 		{
 		case 1:
@@ -311,13 +649,7 @@ CondBool<n, IntTy, 32> nst_search_avx2(const IntTy* keys, size_t size, IntTy tar
 			break;
 		}
 
-		uint32_t m = _mm256_movemask_epi8(peq);
-		uint32_t p = count_trailing_zeroes(m);
-		if (m && (i + p / sizeof(IntTy)) < size)
-		{
-			ret = i + p / sizeof(IntTy);
-			return true;
-		}
+		if (test_eq<IntTy>(peq, i, size, ret)) return true;
 
 		size_t r = popcount(_mm256_movemask_epi8(pgt)) / sizeof(IntTy);
 		i = i * n + (n - 1) * (r + 1);
@@ -326,11 +658,74 @@ CondBool<n, IntTy, 32> nst_search_avx2(const IntTy* keys, size_t size, IntTy tar
 }
 
 template<size_t n, class IntTy>
+CondBool<n, IntTy, 64> nst_search_avx2(const IntTy* keys, size_t size, IntTy target, size_t& ret)
+{
+	static constexpr size_t packet_size = 32 / sizeof(IntTy);
+	static constexpr size_t inner_size = (n - 1) / packet_size;
+
+	size_t i = 0;
+
+	__m256i ptarget, pkey[inner_size], peq[inner_size], pgt[inner_size];
+	switch (sizeof(IntTy))
+	{
+	case 1:
+		ptarget = _mm256_set1_epi8(target);
+		break;
+	case 2:
+		ptarget = _mm256_set1_epi16(target);
+		break;
+	case 4:
+		ptarget = _mm256_set1_epi32(target);
+		break;
+	}
+
+	while (i < size)
+	{
+		pkey[0] = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(&keys[i + 0 * packet_size]));
+		pkey[1] = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(&keys[i + 1 * packet_size]));
+		switch (sizeof(IntTy))
+		{
+		case 1:
+			peq[0] = _mm256_cmpeq_epi8(ptarget, pkey[0]);
+			pgt[0] = _mm256_cmpgt_epi8(ptarget, pkey[0]);
+			peq[1] = _mm256_cmpeq_epi8(ptarget, pkey[1]);
+			pgt[1] = _mm256_cmpgt_epi8(ptarget, pkey[1]);
+			break;
+		case 2:
+			peq[0] = _mm256_cmpeq_epi16(ptarget, pkey[0]);
+			pgt[0] = _mm256_cmpgt_epi16(ptarget, pkey[0]);
+			peq[1] = _mm256_cmpeq_epi16(ptarget, pkey[1]);
+			pgt[1] = _mm256_cmpgt_epi16(ptarget, pkey[1]);
+			break;
+		case 4:
+			peq[0] = _mm256_cmpeq_epi32(ptarget, pkey[0]);
+			pgt[0] = _mm256_cmpgt_epi32(ptarget, pkey[0]);
+			peq[1] = _mm256_cmpeq_epi32(ptarget, pkey[1]);
+			pgt[1] = _mm256_cmpgt_epi32(ptarget, pkey[1]);
+			break;
+		}
+
+		if (test_eq<IntTy>(peq[0], i + 0 * packet_size, size, ret)) return true;
+		if (test_eq<IntTy>(peq[1], i + 1 * packet_size, size, ret)) return true;
+
+		size_t r = (popcount(_mm256_movemask_epi8(pgt[0])) + popcount(_mm256_movemask_epi8(pgt[1]))) / sizeof(IntTy);
+		i = i * n + (n - 1) * (r + 1);
+	}
+	return false;
+}
+
+template<size_t n, class IntTy>
+typename std::enable_if < (n - 1) < 32 / sizeof(IntTy), bool > ::type nst2_search_avx2(const IntTy* keys, size_t size, IntTy target, size_t& ret)
+{
+	return nst_search<n>(keys, size, target, ret);
+}
+
+template<size_t n, class IntTy>
 CondBool<n, IntTy, 32> nst2_search_avx2(const IntTy* keys, size_t size, IntTy target, size_t& ret)
 {
 	size_t i = 0;
 
-	__m256i ptarget, pkey, peq, pgt;
+	__m256i ptarget, pkey, pgt;
 	switch (sizeof(IntTy))
 	{
 	case 1:
@@ -346,8 +741,7 @@ CondBool<n, IntTy, 32> nst2_search_avx2(const IntTy* keys, size_t size, IntTy ta
 
 	while (i + 32 / sizeof(IntTy) < size)
 	{
-		pkey = _mm256_loadu_si256((const __m256i*)&keys[i]);
-		peq, pgt;
+		pkey = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(&keys[i]));
 		switch (sizeof(IntTy))
 		{
 		case 1:
@@ -373,7 +767,7 @@ CondBool<n, IntTy, 32> nst2_search_avx2(const IntTy* keys, size_t size, IntTy ta
 
 	if (i < size)
 	{
-		pkey = _mm256_loadu_si256((const __m256i*)&keys[i]);
+		pkey = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(&keys[i]));
 		switch (sizeof(IntTy))
 		{
 		case 1:
@@ -387,13 +781,85 @@ CondBool<n, IntTy, 32> nst2_search_avx2(const IntTy* keys, size_t size, IntTy ta
 			break;
 		}
 
-		uint32_t m = _mm256_movemask_epi8(pgt);
-		uint32_t p = count_trailing_zeroes(m);
-		if (m && (i + p / sizeof(IntTy)) < size)
+		if (test_eq<IntTy>(pgt, i, size, ret)) return true;
+	}
+	return false;
+}
+
+template<size_t n, class IntTy>
+CondBool<n, IntTy, 64> nst2_search_avx2(const IntTy* keys, size_t size, IntTy target, size_t& ret)
+{
+	static constexpr size_t packet_size = 32 / sizeof(IntTy);
+	static constexpr size_t inner_size = (n - 1) / packet_size;
+
+	size_t i = 0;
+
+	__m256i ptarget, pkey[inner_size], pgt[inner_size];
+	switch (sizeof(IntTy))
+	{
+	case 1:
+		ptarget = _mm256_set1_epi8(target);
+		break;
+	case 2:
+		ptarget = _mm256_set1_epi16(target);
+		break;
+	case 4:
+		ptarget = _mm256_set1_epi32(target);
+		break;
+	}
+
+	while (i + 64 / sizeof(IntTy) < size)
+	{
+		pkey[0] = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(&keys[i + 0 * packet_size]));
+		pkey[1] = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(&keys[i + 1 * packet_size]));
+		switch (sizeof(IntTy))
 		{
-			ret = i + p / sizeof(IntTy);
+		case 1:
+			pgt[0] = _mm256_cmpgt_epi8(ptarget, pkey[0]);
+			pgt[1] = _mm256_cmpgt_epi8(ptarget, pkey[1]);
+			break;
+		case 2:
+			pgt[0] = _mm256_cmpgt_epi16(ptarget, pkey[0]);
+			pgt[1] = _mm256_cmpgt_epi16(ptarget, pkey[1]);
+			break;
+		case 4:
+			pgt[0] = _mm256_cmpgt_epi32(ptarget, pkey[0]);
+			pgt[1] = _mm256_cmpgt_epi32(ptarget, pkey[1]);
+			break;
+		}
+
+		size_t r = (popcount(_mm256_movemask_epi8(pgt[0])) + popcount(_mm256_movemask_epi8(pgt[1]))) / sizeof(IntTy);
+		if (keys[i + r] == target)
+		{
+			ret = i + r;
 			return true;
 		}
+
+		i = i * n + (n - 1) * (r + 1);
+	}
+
+	if (i < size)
+	{
+		pkey[0] = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(&keys[i + 0 * packet_size]));
+		pkey[1] = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(&keys[i + 1 * packet_size]));
+		switch (sizeof(IntTy))
+		{
+		case 1:
+			pgt[0] = _mm256_cmpeq_epi8(ptarget, pkey[0]);
+			pgt[1] = _mm256_cmpeq_epi8(ptarget, pkey[1]);
+			break;
+		case 2:
+			pgt[0] = _mm256_cmpeq_epi16(ptarget, pkey[0]);
+			pgt[1] = _mm256_cmpeq_epi16(ptarget, pkey[1]);
+			break;
+		case 4:
+			pgt[0] = _mm256_cmpeq_epi32(ptarget, pkey[0]);
+			pgt[1] = _mm256_cmpeq_epi32(ptarget, pkey[1]);
+			break;
+		}
+
+		if (test_eq<IntTy>(pgt[0], i + 0 * packet_size, size, ret)) return true;
+		if (test_eq<IntTy>(pgt[1], i + 1 * packet_size, size, ret)) return true;
 	}
 	return false;
 }
