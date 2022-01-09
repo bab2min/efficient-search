@@ -213,6 +213,22 @@ struct NSTSearcher
 	}
 };
 
+template<size_t n>
+struct MixedNSTSearcher : public NSTSearcher<n>
+{
+	static constexpr auto _name = ss::num_to_string<n>::value + ss::from_literal("-ary SearchTree (mixed)");
+
+	template<class KeyTy, class ValueTy>
+	bool search(const KeyTy* keys, const ValueTy* values, size_t size, KeyTy target, ValueTy& found)
+	{
+		size_t idx;
+		if (!mixed_nst_search<n>(keys, size, target, idx)) return false;
+		found = values[idx];
+		return true;
+	}
+};
+
+
 #if defined(__SSE2__) || defined(__AVX2__)
 struct SSE2BBSearcher : public ReferenceSearcher
 {
@@ -548,7 +564,10 @@ int main(int argc, char** argv)
 		NSTSearcher<3>,
 		NSTSearcher<5>,
 		NSTSearcher<9>,
-		NSTSearcher<17>
+		NSTSearcher<17>,
+		MixedNSTSearcher<5>,
+		MixedNSTSearcher<9>,
+		MixedNSTSearcher<17>
 	>;
 
 	for (bool uniform : {true, false})
