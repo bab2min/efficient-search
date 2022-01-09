@@ -137,6 +137,57 @@ bool nst_search(const KeyTy* keys, size_t size, KeyTy target, size_t& ret)
 	return false;
 }
 
+constexpr inline size_t clog2(size_t n)
+{
+	return n == 2 ? 1 : (n <= 1 ? 0 : (clog2((n + 1) / 2) + 1));
+}
+
+template<size_t size, class IntTy>
+size_t balanced_binary_search(const IntTy* keys, IntTy target)
+{
+	constexpr size_t height = clog2(size + 1);
+	size_t dist = (size_t)1 << (height - 1);
+	size_t mid = size - dist;
+	dist >>= 1;
+	size_t left1 = 0, left2 = mid + 1;
+	for (size_t h = 0; h < height; ++h)
+	{
+		if (target > keys[mid]) left1 = left2;
+		left2 = left1 + dist;
+		mid = left1 + dist - 1;
+		dist >>= 1;
+	}
+	return left1;
+}
+
+template<size_t n, class KeyTy>
+bool mixed_nst_search(const KeyTy* keys, size_t size, KeyTy target, size_t& ret)
+{
+	size_t i = 0;
+	while (i + n - 1 <= size)
+	{
+		size_t r = balanced_binary_search<n - 1>(keys + i, target);
+		if (r < n - 1 && i + r < size && keys[i + r] == target)
+		{
+			ret = i + r;
+			return true;
+		}
+		i = i * n + (n - 1) * (r + 1);
+	}
+
+	if (i < size)
+	{
+		for (; i < size; ++i)
+		{
+			if (target == keys[i])
+			{
+				ret = i;
+				return true;
+			}
+		}
+	}
+	return false;
+}
 
 template<size_t n, class IntTy, size_t p>
 using CondBool = typename std::enable_if<(n - 1) == p / sizeof(IntTy), bool>::type;
