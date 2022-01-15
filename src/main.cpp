@@ -2,6 +2,7 @@
 #include <vector>
 #include <string>
 #include <unordered_set>
+#include <unordered_map>
 #include <random>
 #include <limits>
 #include <chrono>
@@ -69,7 +70,6 @@ vector<IntTy> rand_array(size_t size, bool uniform = true, size_t seed = 42)
 	}
 	return ret;
 }
-
 
 struct ReferenceSearcher
 {
@@ -478,6 +478,39 @@ pair<vector<size_t>, double> benchmark(Searcher&& searcher, size_t size, bool un
 }
 
 template<class KeyTy>
+pair<vector<size_t>, double> benchmark_hash(size_t size, bool uniform, size_t sample_size, double hit_rate = 0.5)
+{
+	auto keys = unique_rand_array<KeyTy>(size, uniform);
+	
+	unordered_map<KeyTy, size_t> hash;
+	for (size_t i = 0; i < size; ++i)
+	{
+		hash.emplace(keys[i], i);
+	}
+
+	const size_t target_size = 8192;
+	auto targets = rand_array<KeyTy>(target_size, true, 777);
+	for (size_t i = (size_t)(target_size * hit_rate); i < target_size; ++i)
+	{
+		targets[i] = keys[(size_t)targets[i] % size];
+	}
+	shuffle(targets.begin(), targets.end(), mt19937_64{});
+
+	auto results = vector<size_t>(target_size, size);
+
+	chrono::high_resolution_clock::time_point start_time = chrono::high_resolution_clock::now();
+
+	for (size_t i = 0; i < sample_size; ++i)
+	{
+		auto it = hash.find(targets[i % target_size]);
+		results[i % target_size] = it == hash.end() ? size : it->second;
+	}
+	chrono::high_resolution_clock::time_point end_time = chrono::high_resolution_clock::now();
+	double elapsed = chrono::duration<double, std::milli>{ end_time - start_time }.count();
+	return make_pair(move(results), elapsed);
+}
+
+template<class KeyTy>
 void run_benchmark_partial(const vector<size_t>& ref, double* accum, double* accum_sq, size_t size, bool uniform, size_t sample_size)
 {
 }
@@ -502,17 +535,21 @@ void run_benchmark_partial(const vector<size_t>& ref, double* accum, double* acc
 template<class KeyTy, class... Searchers>
 void run_benchmark_set(tuple<Searchers...>, size_t size, bool uniform, size_t sample_size, size_t repeat = 10)
 {
-	vector<double> accum(sizeof ... (Searchers) + 1), accum_sq(sizeof ... (Searchers) + 1);
+	vector<double> accum(sizeof ... (Searchers) + 2), accum_sq(sizeof ... (Searchers) + 2);
 	for (size_t i = 0; i < repeat; ++i)
 	{
 		auto ref_result = benchmark<KeyTy>(ReferenceSearcher{}, size, uniform, sample_size);
 		accum[0] += ref_result.second;
 		accum_sq[0] += ref_result.second * ref_result.second;
-		run_benchmark_partial<KeyTy, Searchers...>(ref_result.first, accum.data() + 1, accum_sq.data() + 1, size, uniform, sample_size);
+		auto ref_hash_result = benchmark_hash<KeyTy>(size, uniform, sample_size);
+		accum[1] += ref_hash_result.second;
+		accum_sq[1] += ref_hash_result.second * ref_hash_result.second;
+		run_benchmark_partial<KeyTy, Searchers...>(ref_result.first, accum.data() + 2, accum_sq.data() + 2, size, uniform, sample_size);
 	}
 
 	static const char* names[] = {
 		ReferenceSearcher::_name.c_str(),
+		"Reference (Hash)",
 		(Searchers::_name.c_str())...,
 	};
 
